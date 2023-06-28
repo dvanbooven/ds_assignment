@@ -1,0 +1,154 @@
+---
+title: "Final Assignment pt 2"
+author: "Derek Van Booven"
+date: "2023-06-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(corrplot)
+
+```
+
+## Introduction
+
+The specific question that I started with was was there a significant difference in the death per million rate between 2020 and 2021.  Specifically I wanted to select the state of Florida since this has personal significance.  To perform the analysis, I took the deaths from the COVID 19 download and calculated deaths per million.  From this I compared the years of 2020 and 2021 to see perhaps if there was any difference between the two years.
+
+To start with I downloaded the data from the Github repository that contained data from Johns Hopkins.  Included in the data were 2 separate downloads, 1 consisted of cases, and the other was deaths.  They included deaths by day so some manipulation needed to be done to transform the data into a usable datatable.
+
+
+## Import the data
+
+Import the data.
+
+```{r import}
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_deaths_US.csv", "time_series_covid19_confirmed_US.csv")
+urls <- str_c(url_in, file_names)
+
+
+us_cases <- read_csv(urls[2])
+us_deaths <- read_csv(urls[1])
+
+
+```
+
+## Clean data
+
+Using tidyverse I cleaned up the data by using the same methodology in the lecture.  I used tidyverse to rename and reorganize the data with the intention of just keeping the data that I needed for final visualization and modeling.
+
+```{r tidyit }
+
+
+
+us_cases <- us_cases %>% pivot_longer(cols = -(UID:Combined_Key), names_to = "date", values_to = "cases") %>% select(Admin2:cases) %>%  mutate(dates = mdy(date)) %>% select(-c(Lat, Long_))
+
+us_deaths <- us_deaths %>% pivot_longer(cols = -(UID:Population), names_to = "date", values_to = "deaths") %>% select(Admin2:deaths) %>% mutate(dates = mdy(date)) %>% select(-c(Lat, Long_))
+
+```
+
+## Additional Analysis
+
+Included here I figured out a way to classify the dates into seasons.  Originally, I wanted to seperate the data into seasons, but figured it was just as well that we could filter by date later if we needed to.  However, I thought it was useful code that anyone could use.
+
+```{r  seasonal}
+
+us_deaths <- us_deaths %>%
+    mutate(mmdd = format(as.Date(date, "%Y-%m-%d"), "%m%d"),
+           season = case_when(
+               mmdd <= "0320" ~ "Winter",
+               mmdd <= "0620" ~ "Spring",
+               mmdd <= "0922" ~ "Summer",
+               mmdd <= "1220" ~ "Autumn",
+               TRUE ~ "Winter")) %>%
+    select(-mmdd)
+
+us_cases <- us_cases %>%
+    mutate(mmdd = format(as.Date(date, "%Y-%m-%d"), "%m%d"),
+           season = case_when(
+               mmdd <= "0320" ~ "Winter",
+               mmdd <= "0620" ~ "Spring",
+               mmdd <= "0922" ~ "Summer",
+               mmdd <= "1220" ~ "Autumn",
+               TRUE ~ "Winter")) %>%
+    select(-mmdd)
+
+US <- us_cases %>% full_join(us_deaths)
+
+US_permil <- US %>% mutate(deaths_per_mill = (deaths /Population) *  1000000)
+
+florida_permil <- US_permil %>% filter(Province_State == "Florida")
+
+```
+
+
+## Visualizations
+
+Here are the main visualization.  The first graph shows the death rate during the winter time period in 2020 in Florida, and the second graph shows the death rate during the winter montsh in 2021 in Florida.
+
+The graphs here will be by county to give a bit more granular look at the death rates.
+
+
+```{r visualizations}
+
+
+
+florida2020 <- florida_permil %>% filter(between(dates, as.Date('2020-12-31'), as.Date('2021-03-31')))
+
+florida2021 <- florida_permil %>% filter(between(dates, as.Date('2021-12-31'), as.Date('2022-03-31')))
+
+ggplot(florida2020, aes(x = dates, y = deaths_per_mill, group = Admin2)) + geom_point() + geom_line(aes(color = Admin2), show.legend = FALSE) + ggtitle("2020 Winter months in Florida Deaths Per Million") + xlab("Date")
+
+ggplot(florida2021, aes(x = dates, y = deaths_per_mill, group = Admin2)) + geom_point() + geom_line(aes(color = Admin2), show.legend = FALSE) + ggtitle("2021 Winter months in Florida Deaths Per Million") + xlab("Date")
+
+```
+
+
+## Impressions
+
+First thing that jumps out is a rapid increase in deaths in January of 2021.  This was due to a reclassification and a difference in reporting from the state of Florida.  This did not represent some catastrophic incident where a ton of people died.
+
+Second, the graph in 2020 shows relatively low numbers for most of the counties.  There is a single county (Miami/Dade) where the death rate was exceptionally high.  Most of the counties were lower.  Switch over to 2021 and you can see a more broad spectrum in regards to the death rate.
+
+Thus the interpretation from these figures was there indeed was significant differences between 2020 and 2021 and the patterns that were seen in Florida during the winter months.
+
+## Modeling
+
+Here I wanted to see if there was a relationship between cases and deaths from within Florida for 2020.
+
+```{r model }
+
+lm.model20 = lm(deaths ~ cases, florida2020)
+summary(lm.model20)
+
+lm.model21 = lm(deaths ~ cases, florida2021)
+summary(lm.model21)
+
+
+```
+
+Here we can see that there is a fairly strong relationship between cases and deaths, and the F/T statistics are showing promising p-values.  Interestingly, the r squared value for 2020 is much higher than 2021.  This needs a little further investigation so let's do a simple correlation analysis.
+
+## Correlation Analysis
+
+To look at the results of the regression model a little closer, I wanted to do a correlation analysis between cases and deaths from 2020 and 2021.  To do this it's a simple cor function and using the corrplot you can visually see the results.
+
+```{r corr }
+
+for_correlation <- data.frame(florida2020$cases, florida2021$cases, florida2020$deaths, florida2021$deaths)
+corrplot(cor(for_correlation))
+
+
+```
+
+Here you can clearly see there is a correlation between 2020 cases/deaths and 2021 cases.  However, there appears to be a bit of a lesser correlation between 2021 deaths and cases.  In fact the 2021 Florida deaths have a lower correlation on everything it appears.  This would be interesting to investigate further.
+
+
+```{r info}
+
+  sessionInfo()
+```
